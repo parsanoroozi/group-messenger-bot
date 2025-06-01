@@ -23,8 +23,40 @@ const bot = global.bot || new TelegramBot(botToken, {
  }
 });
 
-// Store known users
+// Store known users and group members
 const knownUsers = new Map();
+const groupMembers = new Map();
+
+// Track when users join or leave the group
+bot.on('chat_member', async (msg) => {
+ const chatId = msg.chat.id;
+ const newMember = msg.new_chat_member?.user;
+ const oldMember = msg.old_chat_member?.user;
+
+ console.log('👥 Chat member update:', JSON.stringify(msg, null, 2));
+
+ if (newMember) {
+  // User joined or was added
+  if (msg.new_chat_member.status === 'member' || msg.new_chat_member.status === 'administrator') {
+   groupMembers.set(newMember.id, {
+    id: newMember.id,
+    first_name: newMember.first_name,
+    username: newMember.username,
+    is_admin: msg.new_chat_member.status === 'administrator',
+    group_id: chatId
+   });
+   console.log(`✅ User ${newMember.first_name} (${newMember.id}) joined group ${chatId}`);
+  }
+ }
+
+ if (oldMember) {
+  // User left or was removed
+  if (msg.new_chat_member.status === 'left' || msg.new_chat_member.status === 'kicked') {
+   groupMembers.delete(oldMember.id);
+   console.log(`❌ User ${oldMember.first_name} (${oldMember.id}) left group ${chatId}`);
+  }
+ }
+});
 
 // Track users who interact with the bot
 bot.on('message', (msg) => {
@@ -212,54 +244,23 @@ bot.on('message', async (msg) => {
     const admins = await bot.getChatAdministrators(userState.selectedGroup);
     console.log(`✅ Fetched ${admins.length} admins for group ${userState.selectedGroup}`);
 
-    // Create a map of all available users (admins + known users)
-    const availableUsers = new Map();
+    // Get all members for this group
+    const groupMembersList = Array.from(groupMembers.values())
+     .filter(member => member.group_id === userState.selectedGroup);
 
-    // Add admins
-    admins.forEach(admin => {
-     availableUsers.set(admin.user.id, {
-      id: admin.user.id,
-      first_name: admin.user.first_name,
-      username: admin.user.username,
-      is_admin: true
-     });
-    });
-
-    // Get all known users and check if they're in the group
-    const groupMembers = new Map();
-
-    // First add all admins
-    for (const [userId, user] of availableUsers) {
-     groupMembers.set(userId, user);
-    }
-
-    // Then check other known users
-    for (const [userId, user] of knownUsers) {
-     // Skip if already added as admin
-     if (groupMembers.has(userId)) continue;
-
-     try {
-      // Check if user is in the group
-      const member = await bot.getChatMember(userState.selectedGroup, userId);
-      if (member && member.status !== 'left' && member.status !== 'kicked') {
-       groupMembers.set(userId, {
-        ...user,
-        is_admin: false
-       });
-       console.log(`✅ User ${user.first_name} (${userId}) is in the group`);
-      }
-     } catch (err) {
-      console.log(`❌ User ${user.first_name} (${userId}) is not in the group`);
-     }
-    }
-
-    console.log(`📊 Group members:`, JSON.stringify(Array.from(groupMembers.values()), null, 2));
+    console.log(`📊 Group members:`, JSON.stringify(groupMembersList, null, 2));
 
     // Create inline keyboard with all group members
-    const inlineKeyboard = Array.from(groupMembers.values()).map(user => [{
+    const inlineKeyboard = groupMembersList.map(user => [{
      text: `${user.first_name} (${user.username || 'No username'})${user.is_admin ? ' 👑' : ''}`,
      callback_data: `select_${user.id}`
     }]);
+
+    if (inlineKeyboard.length === 0) {
+     bot.sendMessage(chatId, "⚠️ No members found in the group. Make sure the bot was added to the group before other members joined.");
+     userStates.delete(userId);
+     return;
+    }
 
     bot.sendMessage(chatId, "👥 Select the members to send the message to:", {
      reply_markup: {
