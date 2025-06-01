@@ -72,13 +72,13 @@ const isUserGroupAdmin = async (chatId, userId) => {
 
 // Helper: Get group members
 const getGroupMembers = async (chatId) => {
- console.log(`👥 Fetching member count for group ${chatId}`);
+ console.log(`👥 Fetching members for group ${chatId}`);
  try {
-  const members = await bot.getChatMembersCount(chatId);
-  console.log(`✅ Group ${chatId} has ${members} members`);
-  return members;
+  const chat = await bot.getChat(chatId);
+  console.log(`✅ Group ${chatId} info fetched successfully`);
+  return chat.members_count || 0;
  } catch (err) {
-  console.error(`❌ Could not fetch group members for ${chatId}:`, err.message);
+  console.error(`❌ Could not fetch group info for ${chatId}:`, err.message);
   return 0;
  }
 };
