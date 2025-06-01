@@ -77,8 +77,6 @@ const getGroupMembers = async (chatId) => {
  try {
   const chat = await bot.getChat(chatId);
   console.log(`✅ Group ${chatId} info fetched successfully`);
-  console.log('📊 Chat info:', JSON.stringify(chat, null, 2));
-
   // Get member count separately
   const memberCount = await bot.getChatMembersCount(chatId);
   console.log(`👥 Group has ${memberCount} members`);
