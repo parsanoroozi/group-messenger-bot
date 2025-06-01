@@ -1,9 +1,11 @@
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
+import http from 'http';
 
 dotenv.config();
 
 const botToken = process.env.BOT_TOKEN;
+const PORT = process.env.PORT || 3000;
 
 if (!botToken) {
  console.error("❌ BOT_TOKEN must be defined in .env");
@@ -19,6 +21,18 @@ const bot = new TelegramBot(botToken, {
    timeout: 10 // Timeout in seconds
   }
  }
+});
+
+// Create a simple HTTP server
+const server = http.createServer((req, res) => {
+ res.writeHead(200, { 'Content-Type': 'text/plain' });
+ res.end('Bot is running!');
+});
+
+// Start the server
+server.listen(PORT, () => {
+ console.log(`🌐 Server is running on port ${PORT}`);
+ console.log("🤖 Bot is running...");
 });
 
 // Handle polling errors
@@ -41,8 +55,6 @@ bot.on('error', (error) => {
 });
 
 const userStates = new Map();
-
-console.log("🤖 Bot is running...");
 
 // Helper: Check if user is an admin of a group
 const isUserGroupAdmin = async (chatId, userId) => {
