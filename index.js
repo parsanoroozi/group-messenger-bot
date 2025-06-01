@@ -23,6 +23,25 @@ const bot = global.bot || new TelegramBot(botToken, {
  }
 });
 
+// Store known users
+const knownUsers = new Map();
+
+// Track users who interact with the bot
+bot.on('message', (msg) => {
+ if (!msg.from) return;
+
+ const userId = msg.from.id;
+ if (!knownUsers.has(userId)) {
+  knownUsers.set(userId, {
+   id: userId,
+   first_name: msg.from.first_name,
+   username: msg.from.username,
+   last_interaction: Date.now()
+  });
+  console.log(`👤 New user tracked: ${msg.from.first_name} (${userId})`);
+ }
+});
+
 // Only create HTTP server if we're not in test mode
 if (!global.bot) {
  const server = http.createServer((req, res) => {
@@ -188,13 +207,58 @@ bot.on('message', async (msg) => {
    userState.step = 'selecting_members';
    console.log(`📝 User ${userId} provided message, fetching group members`);
 
-   // Get group members and create inline keyboard
    try {
-    const members = await bot.getChatAdministrators(userState.selectedGroup);
-    console.log(`✅ Fetched ${members.length} members for group ${userState.selectedGroup}`);
-    const inlineKeyboard = members.map(member => [{
-     text: `${member.user.first_name} (${member.user.username || 'No username'})`,
-     callback_data: `select_${member.user.id}`
+    // Get group admins
+    const admins = await bot.getChatAdministrators(userState.selectedGroup);
+    console.log(`✅ Fetched ${admins.length} admins for group ${userState.selectedGroup}`);
+
+    // Create a map of all available users (admins + known users)
+    const availableUsers = new Map();
+
+    // Add admins
+    admins.forEach(admin => {
+     availableUsers.set(admin.user.id, {
+      id: admin.user.id,
+      first_name: admin.user.first_name,
+      username: admin.user.username,
+      is_admin: true
+     });
+    });
+
+    // Get all known users and check if they're in the group
+    const groupMembers = new Map();
+
+    // First add all admins
+    for (const [userId, user] of availableUsers) {
+     groupMembers.set(userId, user);
+    }
+
+    // Then check other known users
+    for (const [userId, user] of knownUsers) {
+     // Skip if already added as admin
+     if (groupMembers.has(userId)) continue;
+
+     try {
+      // Check if user is in the group
+      const member = await bot.getChatMember(userState.selectedGroup, userId);
+      if (member && member.status !== 'left' && member.status !== 'kicked') {
+       groupMembers.set(userId, {
+        ...user,
+        is_admin: false
+       });
+       console.log(`✅ User ${user.first_name} (${userId}) is in the group`);
+      }
+     } catch (err) {
+      console.log(`❌ User ${user.first_name} (${userId}) is not in the group`);
+     }
+    }
+
+    console.log(`📊 Group members:`, JSON.stringify(Array.from(groupMembers.values()), null, 2));
+
+    // Create inline keyboard with all group members
+    const inlineKeyboard = Array.from(groupMembers.values()).map(user => [{
+     text: `${user.first_name} (${user.username || 'No username'})${user.is_admin ? ' 👑' : ''}`,
+     callback_data: `select_${user.id}`
     }]);
 
     bot.sendMessage(chatId, "👥 Select the members to send the message to:", {
