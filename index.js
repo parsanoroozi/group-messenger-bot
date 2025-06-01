@@ -12,28 +12,29 @@ if (!botToken) {
  process.exit(1);
 }
 
-// Add reconnection options
-const bot = new TelegramBot(botToken, {
+// Initialize bot (either real or mock)
+const bot = global.bot || new TelegramBot(botToken, {
  polling: {
-  interval: 300, // Polling interval in ms
+  interval: 300,
   autoStart: true,
   params: {
-   timeout: 10 // Timeout in seconds
+   timeout: 10
   }
  }
 });
 
-// Create a simple HTTP server
-const server = http.createServer((req, res) => {
- res.writeHead(200, { 'Content-Type': 'text/plain' });
- res.end('Bot is running!');
-});
+// Only create HTTP server if we're not in test mode
+if (!global.bot) {
+ const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot is running!');
+ });
 
-// Start the server
-server.listen(PORT, () => {
- console.log(`🌐 Server is running on port ${PORT}`);
- console.log("🤖 Bot is running...");
-});
+ server.listen(PORT, () => {
+  console.log(`🌐 Server is running on port ${PORT}`);
+  console.log("🤖 Bot is running...");
+ });
+}
 
 // Handle polling errors
 bot.on('polling_error', (error) => {
@@ -76,7 +77,7 @@ const getGroupMembers = async (chatId) => {
  try {
   const chat = await bot.getChat(chatId);
   console.log(`✅ Group ${chatId} info fetched successfully`);
-  console.log(`✅ Chat info: ${chat}`)
+  console.log('📊 Chat info:', JSON.stringify(chat, null, 2));
   return chat.members_count || 0;
  } catch (err) {
   console.error(`❌ Could not fetch group info for ${chatId}:`, err.message);
