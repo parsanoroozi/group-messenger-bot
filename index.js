@@ -164,6 +164,7 @@ bot.on('message', async (msg) => {
 
     // Get group members
     const groupInfo = await getGroupMembers(groupId);
+    console.log('📊 Group Info Result:', JSON.stringify(groupInfo, null, 2));
     if (!groupInfo) {
      console.log(`⚠️ Could not get group info for ${groupId}`);
      bot.sendMessage(chatId, "⚠️ Could not fetch group information. Please check the group ID.");
