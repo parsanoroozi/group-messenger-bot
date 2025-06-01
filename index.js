@@ -73,17 +73,15 @@ const isUserGroupAdmin = async (chatId, userId) => {
 
 // Helper: Get group members
 const getGroupMembers = async (chatId) => {
- console.log(`👥 Fetching members for group ${chatId}`);
+ console.log(`👥 Fetching group info for ${chatId}`);
  try {
   const chat = await bot.getChat(chatId);
   console.log(`✅ Group ${chatId} info fetched successfully`);
-  // Get member count separately
-  const memberCount = await bot.getChatMembersCount(chatId);
-  console.log(`👥 Group has ${memberCount} members`);
-  return memberCount;
+  console.log('📊 Chat info:', JSON.stringify(chat, null, 2));
+  return true; // Return true if we can get the chat info
  } catch (err) {
   console.error(`❌ Could not fetch group info for ${chatId}:`, err.message);
-  return 0;
+  return false;
  }
 };
 
@@ -165,10 +163,10 @@ bot.on('message', async (msg) => {
     }
 
     // Get group members
-    const memberCount = await getGroupMembers(groupId);
-    if (memberCount === 0) {
-     console.log(`⚠️ Could not get member count for group ${groupId}`);
-     bot.sendMessage(chatId, "⚠️ Could not fetch group members. Please check the group ID.");
+    const groupInfo = await getGroupMembers(groupId);
+    if (!groupInfo) {
+     console.log(`⚠️ Could not get group info for ${groupId}`);
+     bot.sendMessage(chatId, "⚠️ Could not fetch group information. Please check the group ID.");
      userStates.delete(userId);
      return;
     }
