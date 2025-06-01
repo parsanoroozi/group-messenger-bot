@@ -1,0 +1,1 @@
+the bot is being deployed on render.com

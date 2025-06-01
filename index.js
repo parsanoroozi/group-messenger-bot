@@ -11,21 +11,9 @@ if (!botToken) {
 }
 
 const bot = new TelegramBot(botToken, { polling: true });
-const knownUsers = new Map();
+const userStates = new Map();
 
 console.log("🤖 Bot is running...");
-
-// Store users who interact with the bot
-bot.on('message', (msg) => {
- if (!msg.from || knownUsers.has(msg.from.id)) return;
-
- knownUsers.set(msg.from.id, {
-  username: msg.from.username,
-  first_name: msg.from.first_name
- });
-
- console.log(`🆕 New user: ${msg.from.first_name} (${msg.from.id})`);
-});
 
 // Helper: Check if user is an admin of a group
 const isUserGroupAdmin = async (chatId, userId) => {
@@ -38,67 +26,168 @@ const isUserGroupAdmin = async (chatId, userId) => {
  }
 };
 
-// /startmsg command — send to selected users
-bot.onText(/\/startmsg/, async (msg) => {
+// Helper: Get group members
+const getGroupMembers = async (chatId) => {
+ try {
+  const members = await bot.getChatMembersCount(chatId);
+  return members;
+ } catch (err) {
+  console.error("⚠️ Could not fetch group members:", err.message);
+  return 0;
+ }
+};
+
+// /start command
+bot.onText(/\/start/, (msg) => {
+ const chatId = msg.chat.id;
+ bot.sendMessage(chatId, "👋 Welcome! Use /send to start sending messages to group members.");
+});
+
+// /send command - start the message sending process
+bot.onText(/\/send/, async (msg) => {
  const chatId = msg.chat.id;
  const userId = msg.from.id;
 
- const isGroup = chatId < 0;
- let isAdmin = true;
-
- if (isGroup) {
-  isAdmin = await isUserGroupAdmin(chatId, userId);
- }
-
- if (!isAdmin) {
-  return bot.sendMessage(chatId, "⛔ Only group admins can use this command.");
- }
-
- bot.sendMessage(chatId, "📝 Please send the message you'd like to broadcast:");
-
- bot.once('message', (reply) => {
-  if (reply.from.id !== userId) return;
-  const messageText = reply.text;
-  showUserSelection(chatId, messageText);
+ // Reset user state
+ userStates.set(userId, {
+  step: 'waiting_for_group_id',
+  messageText: null,
+  selectedGroup: null,
+  selectedMembers: new Set()
  });
+
+ bot.sendMessage(chatId, "📝 Please enter the group ID where you want to send messages:");
 });
 
-// Show inline keyboard of known users
-function showUserSelection(chatId, messageText) {
- if (knownUsers.size === 0) {
-  return bot.sendMessage(chatId, "⚠️ No known users available.");
+// Handle all messages
+bot.on('message', async (msg) => {
+ const chatId = msg.chat.id;
+ const userId = msg.from.id;
+ const userState = userStates.get(userId);
+
+ if (!userState) return;
+
+ switch (userState.step) {
+  case 'waiting_for_group_id':
+   const groupId = msg.text;
+   try {
+    // Verify if user is admin of the group
+    const isAdmin = await isUserGroupAdmin(groupId, userId);
+    if (!isAdmin) {
+     bot.sendMessage(chatId, "⛔ You must be an admin of the group to use this feature.");
+     userStates.delete(userId);
+     return;
+    }
+
+    // Get group members
+    const memberCount = await getGroupMembers(groupId);
+    if (memberCount === 0) {
+     bot.sendMessage(chatId, "⚠️ Could not fetch group members. Please check the group ID.");
+     userStates.delete(userId);
+     return;
+    }
+
+    userState.selectedGroup = groupId;
+    userState.step = 'waiting_for_message';
+    bot.sendMessage(chatId, "📝 Now, please enter the message you want to send:");
+   } catch (err) {
+    bot.sendMessage(chatId, "⚠️ Invalid group ID or error occurred. Please try again.");
+    userStates.delete(userId);
+   }
+   break;
+
+  case 'waiting_for_message':
+   userState.messageText = msg.text;
+   userState.step = 'selecting_members';
+
+   // Get group members and create inline keyboard
+   try {
+    const members = await bot.getChatAdministrators(userState.selectedGroup);
+    const inlineKeyboard = members.map(member => [{
+     text: `${member.user.first_name} (${member.user.username || 'No username'})`,
+     callback_data: `select_${member.user.id}`
+    }]);
+
+    bot.sendMessage(chatId, "👥 Select the members to send the message to:", {
+     reply_markup: {
+      inline_keyboard: inlineKeyboard
+     }
+    });
+   } catch (err) {
+    bot.sendMessage(chatId, "⚠️ Error fetching group members. Please try again.");
+    userStates.delete(userId);
+   }
+   break;
  }
+});
 
- const inlineKeyboard = [];
-
- for (const [userId, user] of knownUsers.entries()) {
-  const label = user.first_name || user.username || `ID ${userId}`;
-  const encodedMessage = Buffer.from(messageText).toString('base64');
-  const callbackData = `sendto_${userId}_${encodedMessage}`;
-  inlineKeyboard.push([{ text: label, callback_data: callbackData }]);
- }
-
- bot.sendMessage(chatId, "👤 Select user(s) to send the message to:", {
-  reply_markup: {
-   inline_keyboard: inlineKeyboard
-  }
- });
-}
-
-// Handle button click
+// Handle button clicks for member selection
 bot.on('callback_query', async (callbackQuery) => {
  const data = callbackQuery.data;
+ const userId = callbackQuery.from.id;
+ const userState = userStates.get(userId);
 
- if (!data.startsWith("sendto_")) return;
+ if (!userState || !data.startsWith('select_')) return;
 
- const [, userId, encodedMessage] = data.split("_");
- const messageText = Buffer.from(encodedMessage, 'base64').toString();
+ const selectedMemberId = data.split('_')[1];
+ userState.selectedMembers.add(selectedMemberId);
 
- try {
-  await bot.sendMessage(userId, messageText);
-  await bot.answerCallbackQuery(callbackQuery.id, { text: "✅ Message sent!" });
- } catch (err) {
-  console.error("❌ Failed to send message:", err.message);
-  await bot.answerCallbackQuery(callbackQuery.id, { text: "❌ Failed to send." });
+ // Send confirmation
+ await bot.answerCallbackQuery(callbackQuery.id, {
+  text: "✅ Member selected! Click 'Send Message' when done selecting.",
+  show_alert: true
+ });
+
+ // Add a "Send Message" button if not already present
+ if (!userState.sentConfirmationButton) {
+  await bot.editMessageReplyMarkup({
+   inline_keyboard: [
+    ...callbackQuery.message.reply_markup.inline_keyboard,
+    [{ text: "📤 Send Message", callback_data: "send_message" }]
+   ]
+  }, {
+   chat_id: callbackQuery.message.chat.id,
+   message_id: callbackQuery.message.message_id
+  });
+  userState.sentConfirmationButton = true;
  }
+});
+
+// Handle final message sending
+bot.on('callback_query', async (callbackQuery) => {
+ const data = callbackQuery.data;
+ const userId = callbackQuery.from.id;
+ const userState = userStates.get(userId);
+
+ if (!userState || data !== 'send_message') return;
+
+ if (userState.selectedMembers.size === 0) {
+  await bot.answerCallbackQuery(callbackQuery.id, {
+   text: "⚠️ Please select at least one member!",
+   show_alert: true
+  });
+  return;
+ }
+
+ // Send messages to selected members
+ let successCount = 0;
+ let failCount = 0;
+
+ for (const memberId of userState.selectedMembers) {
+  try {
+   await bot.sendMessage(memberId, userState.messageText);
+   successCount++;
+  } catch (err) {
+   console.error(`Failed to send message to ${memberId}:`, err.message);
+   failCount++;
+  }
+ }
+
+ // Send final report
+ await bot.sendMessage(callbackQuery.message.chat.id,
+  `📊 Message sending complete:\n✅ Successfully sent: ${successCount}\n❌ Failed: ${failCount}`
+ );
+
+ // Clean up
+ userStates.delete(userId);
 });
